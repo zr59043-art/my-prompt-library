@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CO-STAR 提示词生成器（联动提示词库）</title>
+<style>
+  /* ============================================================
+     设计 token —— 柔和温馨，与「提示词库」共用
+     ============================================================ */
+  :root {
+    color-scheme: light;
+
+    --bg: #fdf8f2;                                 /* 暖调纸白 */
+    --panel: rgba(255, 255, 255, .86);
+    --panel-solid: #fffdfa;
+    --panel-soft: #fdf7f0;
+    --border: #f0e4d6;
+    --border-strong: #e2d1bd;
+
+    --text: #453629;                               /* 暖褐正文 */
+    --muted: #8a7360;
+    --faint: #b3a08c;
+
+    --coral: #ff8a6b;                              /* 珊瑚 */
+    --coral-deep: #ea6a48;
+    --coral-soft: #fff0ea;
+    --coral-line: #ffcab8;
+
+    --peach: #ffb184;                              /* 蜜桃 */
+    --rose: #f491b4;                               /* 玫瑰粉 */
+    --rose-soft: #fff0f5;
+    --lav: #b9a5e8;                                /* 薰衣草 */
+    --sage: #83c5a4;                               /* 鼠尾草绿 */
+    --sage-deep: #5aaa84;
+    --sage-soft: #ebf8f1;
+    --gold: #e8b34a;                               /* 暖金 */
+    --gold-soft: #fdf6e3;
+    --honey: #d98324;                              /* 蜜糖橙（警告文字用） */
+    --danger: #d9534f;
+
+    --accent: var(--coral);
+    --glow-coral: 0 0 0 3px rgba(255, 138, 107, .18), 0 0 20px rgba(255, 138, 107, .12);
+    --glow-sage: 0 4px 18px rgba(131, 197, 164, .32);
+    --glow-primary: 0 4px 18px rgba(255, 138, 107, .34);
+    --shadow-sm: 0 1px 3px rgba(150, 110, 75, .08);
+    --shadow-md: 0 10px 30px rgba(150, 110, 75, .10);
+
+    --radius-sm: 7px;
+    --radius: 11px;
+    --radius-lg: 16px;
+  }
+
+  * { box-sizing: border-box; }
+
+  /* 暖光 + 细点阵：
+     第一层是极浅的点阵（暖褐 6%），铺满整页像细麻布；
+     下三层是珊瑚 / 玫瑰 / 金的柔软光晕，固定不动。 */
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(rgba(160, 120, 85, .16) 1px, transparent 1px),
+      radial-gradient(900px 520px at 10% -14%,  rgba(255, 177, 132, .34), transparent 62%),
+      radial-gradient(840px 500px at 92% -6%,   rgba(244, 145, 180, .26), transparent 64%),
+      radial-gradient(760px 520px at 46% 112%,  rgba(131, 197, 164, .20), transparent 62%),
+      radial-gradient(620px 400px at 72% 42%,   rgba(232, 179, 74, .16), transparent 70%);
+    background-size: 18px 18px, auto, auto, auto, auto;
+    background-attachment: fixed;
+    background-repeat: repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+    color: var(--text);
+    font: 14px/1.65 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+
+  /* ============================================================
+     顶栏
+     ============================================================ */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 20px;
+    background: rgba(255, 252, 248, .8);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* 顶栏底边一道暖色细线 */
+  .topbar::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: linear-gradient(90deg,
+      transparent, var(--peach), var(--rose), var(--gold), transparent);
+    opacity: .55;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .brand .logo {
+    flex: 0 0 auto;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    color: #fff;
+    background: linear-gradient(135deg, var(--peach), var(--coral-deep));
+    border-radius: var(--radius-sm);
+    box-shadow: 0 3px 12px rgba(255, 138, 107, .38);
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .brand .sub {
+    font-size: 12.5px;
+    color: var(--faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 跳转到另一个页面的胶囊按钮 */
+  .jump-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    padding: 7px 15px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--coral-deep);
+    text-decoration: none;
+    background: var(--coral-soft);
+    border: 1px solid var(--coral-line);
+    border-radius: 999px;
+    transition: background .18s, border-color .18s, box-shadow .18s, transform .18s;
+  }
+  .jump-btn:hover {
+    background: #ffe4da;
+    border-color: var(--coral);
+    box-shadow: 0 4px 16px rgba(255, 138, 107, .26);
+    transform: translateY(-1px);
+  }
+  .jump-btn .arrow { transition: transform .18s; }
+  .jump-btn:hover .arrow { transform: translateX(3px); }
+
+  /* ============================================================
+     主体两栏
+     ============================================================ */
+  .layout {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 18px 20px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    padding: 17px 19px 19px;
+  }
+
+  .panel h2 {
+    margin: 0 0 14px;
+    padding-bottom: 10px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ============================================================
+     表单
+     ============================================================ */
+  .field { margin-bottom: 14px; }
+
+  .field label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #5c4936;
+  }
+
+  .field label .tag {
+    display: inline-block;
+    min-width: 18px;
+    margin-right: 6px;
+    padding: 0 5px;
+    border-radius: 5px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--peach), var(--coral-deep));
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+    line-height: 18px;
+    vertical-align: 1px;
+  }
+
+  /* 归档信息不是 CO-STAR 的一部分，用灰紫标签区分开 */
+  .field label .tag.meta {
+    background: linear-gradient(135deg, #c0b0e0, #9b87c9);
+  }
+
+  .field label .hint {
+    font-weight: 400;
+    color: var(--faint);
+    font-size: 12px;
+  }
+
+  textarea,
+  input[type="text"],
+  select {
+    width: 100%;
+    padding: 8px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel-solid);
+    color: var(--text);
+    font: inherit;
+    font-size: 13.5px;
+    line-height: 1.55;
+    outline: none;
+    transition: border-color .18s, box-shadow .18s, background .18s;
+  }
+
+  textarea { resize: vertical; min-height: 64px; }
+
+  textarea:focus,
+  input[type="text"]:focus,
+  select:focus {
+    background: #fff;
+    border-color: var(--coral);
+    box-shadow: var(--glow-coral);
+  }
+
+  textarea::placeholder,
+  input[type="text"]::placeholder { color: #c4b4a2; }
+
+  /* 下拉框选到「自定义…」时出现的输入框，用虚线边框区别于预设选项 */
+  .custom-input {
+    margin-top: 6px;
+    border-style: dashed;
+    border-color: var(--lav);
+    background: #fbf8ff;
+  }
+  .custom-input:focus {
+    border-color: var(--lav);
+    box-shadow: 0 0 0 3px rgba(185, 165, 232, .2);
+  }
+
+  /* ---------- 归档信息分组 ---------- */
+  .meta-group {
+    margin-bottom: 16px;
+    padding: 14px 15px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(150deg, var(--coral-soft), var(--gold-soft) 60%, var(--sage-soft));
+  }
+
+  .meta-group .group-title {
+    margin-bottom: 11px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    color: #9b87c9;
+  }
+
+  .meta-group .field:last-child { margin-bottom: 0; }
+
+  .lib-status {
+    display: block;
+    margin-top: 5px;
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--faint);
+  }
+  .lib-status.ok { color: var(--sage-deep); }
+  .lib-status.warn { color: var(--honey); }
+
+  /* ============================================================
+     按钮
+     ============================================================ */
+  button {
+    padding: 8px 17px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--panel-solid);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background .18s, border-color .18s, box-shadow .18s, transform .18s;
+  }
+
+  button:hover {
+    background: #fff8f2;
+    border-color: var(--coral-line);
+    box-shadow: 0 3px 12px rgba(200, 150, 110, .14);
+  }
+  button:active { transform: translateY(1px); }
+
+  button.primary {
+    color: #fff;
+    background: linear-gradient(135deg, var(--peach), var(--coral-deep));
+    border-color: transparent;
+    box-shadow: var(--glow-primary);
+  }
+  button.primary:hover {
+    background: linear-gradient(135deg, #ffc099, #f07a58);
+    border-color: transparent;
+  }
+
+  button.save {
+    color: #fff;
+    background: linear-gradient(135deg, var(--sage), var(--sage-deep));
+    border-color: transparent;
+    box-shadow: var(--glow-sage);
+  }
+  button.save:hover {
+    background: linear-gradient(135deg, #96d2b4, #4f9e79);
+    border-color: transparent;
+  }
+
+  button.copied {
+    color: #fff;
+    background: linear-gradient(135deg, var(--sage), var(--sage-deep));
+    border-color: transparent;
+  }
+
+  button.mini {
+    margin-left: 6px;
+    padding: 1px 10px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--coral-deep);
+    background: transparent;
+    border-color: var(--coral-line);
+    border-radius: 999px;
+    vertical-align: 1px;
+  }
+  button.mini:hover { background: var(--coral-soft); border-color: var(--coral); }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ============================================================
+     预览区
+     ============================================================ */
+  .preview-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .preview-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .preview-head h2 {
+    margin: 0;
+    padding: 0;
+    border: none;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  #status { font-size: 12px; color: var(--muted); }
+  #status.warn { color: var(--honey); }
+  #status.ok { color: var(--sage-deep); }
+
+  /* 预览区顶部显示「这条会存到哪」 */
+  #previewMeta {
+    margin-bottom: 9px;
+    padding: 8px 12px;
+    border: 1px solid var(--coral-line);
+    border-radius: var(--radius);
+    background: linear-gradient(90deg, var(--coral-soft), var(--gold-soft));
+    font-size: 12px;
+    color: #9c6a4a;
+    word-break: break-all;
+  }
+
+  #output {
+    margin: 0;
+    padding: 15px;
+    min-height: 340px;
+    max-height: 62vh;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel-soft);
+    color: #5a4736;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  #output.placeholder {
+    color: var(--faint);
+    font-family: inherit;
+    font-size: 13.5px;
+  }
+
+  /* ============================================================
+     滚动条
+     ============================================================ */
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-thumb {
+    background: #e6d5c2;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #d8c1a8; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ============================================================
+     页脚
+     ============================================================ */
+  footer {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 14px 20px 24px;
+    color: var(--faint);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  footer code {
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--coral-soft);
+    border: 1px solid var(--coral-line);
+    color: var(--coral-deep);
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+  }
+
+  footer a { color: var(--coral-deep); }
+
+  /* ============================================================
+     窄屏
+     ============================================================ */
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); padding: 14px 14px 0; }
+    .brand .sub { display: none; }
+    #output { max-height: none; min-height: 240px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">CO-STAR</span>
+    <h1>提示词生成器</h1>
+    <span class="sub">填完六个要素，一键存进提示词库</span>
+  </div>
+  <a class="jump-btn" href="prompt库_联动版.html">提示词库 <span class="arrow">→</span></a>
+</header>
+
+<main class="layout">
+
+  <!-- ============ 左侧：输入区 ============ -->
+  <section class="panel">
+    <h2>输入</h2>
+
+    <!-- 归档信息：只用于存进提示词库，不进正文 -->
+    <div class="meta-group">
+      <div class="group-title">归档信息 — 存库时用，不会出现在提示词正文里</div>
+
+      <div class="field">
+        <label for="category">
+          <span class="tag meta">分类</span>所属分类
+          <button type="button" class="mini" id="btn-reload">刷新</button>
+        </label>
+        <select id="category"></select>
+        <span class="lib-status" id="libStatus"></span>
+      </div>
+
+      <div class="field">
+        <label for="promptTitle"><span class="tag meta">标题</span>标题 <span class="hint">— 直接决定存库后第二栏显示的标题</span></label>
+        <input type="text" id="promptTitle" placeholder="例如：Python 数据处理脚本审查">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="context"><span class="tag">C</span>Context 背景 <span class="hint">— 你在什么情况下提问</span></label>
+      <textarea id="context" placeholder="例如：我写了一个 Python 脚本，从三个 CSV 里读数据、合并、算指标，最后写回 Excel。"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="objective"><span class="tag">O</span>Objective 目标 <span class="hint">— 你想让模型做什么</span></label>
+      <textarea id="objective" placeholder="例如：帮我审查这段代码，按严重程度列出问题清单，并给出修改后的代码。"></textarea>
+    </div>
+
+    <div class="field" data-custom>
+      <label for="style"><span class="tag">S</span>Style 风格</label>
+      <select id="style">
+        <option value="">请选择…</option>
+        <option value="专业严谨，用词准确、论证有据">专业严谨（论证有据）</option>
+        <option value="简洁明了，去掉修饰，直奔重点">简洁明了（直奔重点）</option>
+        <option value="通俗易懂，多用日常比喻和例子">通俗易懂（比喻+例子）</option>
+        <option value="故事化叙述，有场景、有情节推进">故事化叙述（有场景情节）</option>
+        <option value="学术论文风格，结构规范，术语准确">学术论文（结构规范）</option>
+        <option value="新闻报道风格，客观中立，把关键信息放在最前面">新闻报道（信息前置）</option>
+        <option value="技术文档风格，步骤清晰，读者可以照着直接操作">技术文档（可照着做）</option>
+        <option value="口语化随笔，像随手记下来的笔记">口语化随笔（随手记）</option>
+        <option value="商业提案风格，突出价值、成本和收益">商业提案（讲价值收益）</option>
+        <option value="教学讲解风格，循序渐进，先铺垫再深入">教学讲解（循序渐进）</option>
+        <option value="极简电报体，只保留核心信息，能省的字都省掉">极简电报体（只留核心）</option>
+        <option value="营销文案风格，开头有钩子，结尾有行动号召">营销文案（有钩子）</option>
+        <option value="__custom__">自定义…（自己写一个）</option>
+      </select>
+      <input type="text" class="custom-input" id="style-custom" placeholder="自己写一个风格描述，例如：文言文风格，半文半白">
+    </div>
+
+    <div class="field" data-custom>
+      <label for="tone"><span class="tag">T</span>Tone 语气</label>
+      <select id="tone">
+        <option value="">请选择…</option>
+        <option value="正式专业，客观中立">正式专业（客观中立）</option>
+        <option value="友好亲切，像朋友聊天一样">友好亲切（像朋友聊天）</option>
+        <option value="幽默轻松，适度调侃但不失分寸">幽默轻松（适度调侃）</option>
+        <option value="权威自信，语气坚定有说服力">权威自信（坚定有说服力）</option>
+        <option value="温和鼓励，多肯定、少批评">温和鼓励（多肯定）</option>
+        <option value="冷静克制，只陈述事实，不带情绪色彩">冷静克制（只讲事实）</option>
+        <option value="热情洋溢，情绪饱满，有感染力">热情洋溢（有感染力）</option>
+        <option value="严肃警示，强调风险和可能的后果">严肃警示（强调后果）</option>
+        <option value="共情体贴，先理解对方处境再给建议">共情体贴（先理解）</option>
+        <option value="直率坦率，有话直说，不绕弯子">直率坦率（不绕弯子）</option>
+        <option value="谦逊谨慎，留有余地，避免绝对化表述">谦逊谨慎（留有余地）</option>
+        <option value="激昂有力，有号召感和鼓动性">激昂有力（有号召感）</option>
+        <option value="__custom__">自定义…（自己写一个）</option>
+      </select>
+      <input type="text" class="custom-input" id="tone-custom" placeholder="自己写一个语气描述，例如：像老师在办公室跟你谈心">
+    </div>
+
+    <div class="field">
+      <label for="audience"><span class="tag">A</span>Audience 受众 <span class="hint">— 写给谁看</span></label>
+      <input type="text" id="audience" placeholder="例如：有 3 年经验的 Python 开发者">
+    </div>
+
+    <div class="field" data-custom>
+      <label for="format"><span class="tag">R</span>Response Format 输出格式</label>
+      <select id="format">
+        <option value="">请选择…</option>
+        <option value="Markdown 格式，使用多级标题和列表组织内容">Markdown（多级标题+列表）</option>
+        <option value="纯文本段落，不要使用任何 Markdown 标记或特殊符号">纯文本段落（无标记）</option>
+        <option value="要点列表，每条一句话，不超过 6 条">要点列表（每条一句话）</option>
+        <option value="分点回答，每条先给一句概括，再展开 2-3 句详细说明，必要时举例">分点回答（每点详细展开）</option>
+        <option value="JSON 格式，字段名用英文，值用中文">JSON（英文字段名）</option>
+        <option value="Markdown 表格，用于横向对比多个对象">表格对比（Markdown 表格）</option>
+        <option value="分步骤编号列表，每一步都是一个可以直接执行的动作">分步骤列表（每步可执行）</option>
+        <option value="问答形式，先列出问题，再逐条回答">问答形式（一问一答）</option>
+        <option value="大纲形式，只给层级标题和关键词，不要展开成句">纯大纲（不展开）</option>
+        <option value="代码块，只给可以直接运行的代码，注释从简">代码块（可直接运行）</option>
+        <option value="YAML 格式，缩进清晰，不要多余注释">YAML（缩进清晰）</option>
+        <option value="一段话摘要，不超过 100 字，不要分点">一段话摘要（100 字内）</option>
+        <option value="先给结论，再给理由，最后给需要注意的点">结论先行（倒金字塔）</option>
+        <option value="__custom__">自定义…（自己写一个）</option>
+      </select>
+      <input type="text" class="custom-input" id="format-custom" placeholder="自己写一个格式要求，例如：三列表格 + 一句总结">
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="btn-generate">生成</button>
+      <button id="btn-copy">复制</button>
+      <button id="btn-example">随机示例</button>
+      <button class="save" id="btn-save">存入提示词库</button>
+    </div>
+  </section>
+
+  <!-- ============ 右侧：预览区 ============ -->
+  <section class="panel preview-panel">
+    <div class="preview-head">
+      <h2>预览</h2>
+      <span id="status"></span>
+    </div>
+    <div id="previewMeta"></div>
+    <pre id="output" class="placeholder">点击左侧「生成」按钮查看结果…</pre>
+  </section>
+
+</main>
+
+<footer>
+  提示：本文件与提示词库共用同一个 localStorage 键 <code>prompt-library-v1</code>。
+  若「刷新」后仍显示未连接，说明浏览器把每个 file:// 页面隔离了存储，此时存库的数据不会出现在提示词库里。
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ============================================================
+   * 0. 与提示词库共用的约定
+   * ============================================================ */
+  var LIB_KEY = "prompt-library-v1";   // 必须和提示词库里的 STORE_KEY 一致
+
+  // 提示词库的种子分类，原样复制一份作为「读不到库数据」时的兜底
+  var SEED_CATEGORIES = [
+    { id: "cat-dev",      name: "代码开发", parentId: null },
+    { id: "cat-review",   name: "代码审查", parentId: "cat-dev" },
+    { id: "cat-refactor", name: "重构优化", parentId: "cat-dev" },
+    { id: "cat-test",     name: "单元测试", parentId: "cat-dev" },
+    { id: "cat-doc",      name: "文档写作", parentId: null },
+    { id: "cat-api",      name: "接口文档", parentId: "cat-doc" },
+    { id: "cat-arch",     name: "架构设计", parentId: null }
+  ];
+
+  function uid() {
+    // 和提示词库生成 id 的规则保持一致
+    return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+  }
+
+  function makeSummary(text) {
+    // 和提示词库的列表摘要规则保持一致
+    var s = String(text || "").replace(/\s+/g, " ").trim();
+    return s.length > 60 ? s.slice(0, 60) + "…" : s;
+  }
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, function (m) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m];
+    });
+  }
+
+  /* ============================================================
+   * 1. 字段定义
+   *    META 字段只用于归档，不进 CO-STAR 正文
+   * ============================================================ */
+  var META_FIELDS = [
+    { id: "category",    cn: "分类" },
+    { id: "promptTitle", cn: "标题" }
+  ];
+
+  var FIELDS = [
+    { id: "context",   label: "CONTEXT",         cn: "背景"     },
+    { id: "objective", label: "OBJECTIVE",       cn: "目标"     },
+    { id: "style",     label: "STYLE",           cn: "风格"     },
+    { id: "tone",      label: "TONE",            cn: "语气"     },
+    { id: "audience",  label: "AUDIENCE",        cn: "受众"     },
+    { id: "format",    label: "RESPONSE FORMAT", cn: "输出格式" }
+  ];
+
+  var ALL_FIELDS = META_FIELDS.concat(FIELDS);
+
+  /* 示例库：分类用的是提示词库里的分类 id。
+     下拉类字段的值必须和 <option value="..."> 完全一致，对不上会退回「自定义…」。 */
+  var EXAMPLES = [
+    {
+      name: "代码审查",
+      category:    "cat-review",
+      promptTitle: "Python 数据处理脚本审查",
+      context:     "我写了一个 Python 脚本，从三个 CSV 里读数据、按订单号合并、算几个指标，最后写回 Excel。跑得慢的地方我猜在合并那步，但不确定。",
+      objective:   "帮我审查这段代码，按严重程度列出问题清单，并给出修改后的完整代码。",
+      style:       "技术文档风格，步骤清晰，读者可以照着直接操作",
+      tone:        "直率坦率，有话直说，不绕弯子",
+      audience:    "有 3 年经验、但不熟悉 pandas 内部机制的 Python 开发者",
+      format:      "分点回答，每条先给一句概括，再展开 2-3 句详细说明，必要时举例"
+    },
+    {
+      name: "单元测试",
+      category:    "cat-test",
+      promptTitle: "订单金额计算单元测试",
+      context:     "OrderService.calcTotal() 会依次应用会员折扣、优惠券和运费规则，分支很多。这个方法目前一行测试都没有，我不敢动它。",
+      objective:   "为这个方法生成完整的单元测试，覆盖正常路径、边界值和异常路径。",
+      style:       "技术文档风格，步骤清晰，读者可以照着直接操作",
+      tone:        "正式专业，客观中立",
+      audience:    "项目组里的 Java 开发者",
+      format:      "代码块，只给可以直接运行的代码，注释从简"
+    },
+    {
+      name: "重构优化",
+      category:    "cat-refactor",
+      promptTitle: "Excel 处理脚本提速",
+      context:     "我用 pandas 处理 10 万行 Excel，跑一次要 3 分钟，每天要跑十几遍，实在等不起。我会用 pandas，但不懂它底层的执行机制。",
+      objective:   "帮我找出性能瓶颈，给出优化后的版本，并逐条解释每处改动为什么能提速。",
+      style:       "技术文档风格，步骤清晰，读者可以照着直接操作",
+      tone:        "直率坦率，有话直说，不绕弯子",
+      audience:    "有基础但不熟悉 pandas 内部原理的 Python 开发者",
+      format:      "代码块，只给可以直接运行的代码，注释从简"
+    },
+    {
+      name: "接口文档",
+      category:    "cat-api",
+      promptTitle: "用户注册接口文档",
+      context:     "用户注册接口已经开发完了，但一直没人整理文档，前端同事每次都要来问我参数怎么传。",
+      objective:   "帮我把这个接口的文档写出来，包含请求参数、返回结构、错误码和调用示例。",
+      style:       "技术文档风格，步骤清晰，读者可以照着直接操作",
+      tone:        "正式专业，客观中立",
+      audience:    "对接这个接口的前端开发同事",
+      format:      "Markdown 格式，使用多级标题和列表组织内容"
+    },
+    {
+      name: "架构评审",
+      category:    "cat-arch",
+      promptTitle: "订单系统拆分方案评审",
+      context:     "我们的订单系统目前是一体的，现在想拆成独立服务，但团队里对按什么维度拆有分歧，会上吵了两次没结论。",
+      objective:   "帮我梳理这个拆分方案的取舍，列出必须先回答清楚的关键问题。",
+      style:       "商业提案风格，突出价值、成本和收益",
+      tone:        "冷静克制，只陈述事实，不带情绪色彩",
+      audience:    "技术负责人和产品经理",
+      format:      "分点回答，每条先给一句概括，再展开 2-3 句详细说明，必要时举例"
+    },
+    {
+      name: "概念讲解",
+      category:    "cat-dev",
+      promptTitle: "向新人解释幂等性",
+      context:     "组里新来的同事不理解「幂等性」是什么意思。我照着定义解释了两遍，他还是有点懵。",
+      objective:   "用一个具体场景把幂等性讲清楚，让我能直接转述给他听。",
+      style:       "通俗易懂，多用日常比喻和例子",
+      tone:        "友好亲切，像朋友聊天一样",
+      audience:    "刚入行的后端开发",
+      format:      "问答形式，先列出问题，再逐条回答"
+    }
+  ];
+
+  var lastExample = -1;  // 记住上次抽到的，避免连续两次重复
+
+  /* ============================================================
+   * 2. DOM 引用与通用取值
+   * ============================================================ */
+  var CUSTOM = "__custom__";   // 下拉框里「自定义…」这一项的值
+  var customInputs = {};       // 字段 id -> 对应的手输框
+
+  var el = {};
+  ALL_FIELDS.forEach(function (f) { el[f.id] = document.getElementById(f.id); });
+
+  var output      = document.getElementById("output");
+  var previewMeta = document.getElementById("previewMeta");
+  var libStatus   = document.getElementById("libStatus");
+  var status      = document.getElementById("status");
+  var btnGen      = document.getElementById("btn-generate");
+  var btnCopy     = document.getElementById("btn-copy");
+  var btnEx       = document.getElementById("btn-example");
+  var btnSave     = document.getElementById("btn-save");
+  var btnReload   = document.getElementById("btn-reload");
+
+  var PLACEHOLDER_TEXT = "点击左侧「生成」按钮查看结果…";
+  var hasGenerated = false;
+
+  // 读取一个字段的最终值：下拉框停在「自定义…」上就取手输框的内容
+  function readValue(id) {
+    var node = el[id];
+    if (node.tagName === "SELECT" && node.value === CUSTOM) {
+      var box = customInputs[id];
+      return box ? box.value.trim() : "";
+    }
+    return (node.value || "").trim();
+  }
+
+  /* ============================================================
+   * 3. 提示词库读写
+   * ============================================================ */
+  var libCategories = SEED_CATEGORIES;   // 当前下拉里的分类
+  var libPromptCount = 0;
+  var connected = false;                 // 是否真的读到了提示词库已存的数据
+
+  function readLibrary() {
+    try {
+      var raw = localStorage.getItem(LIB_KEY);
+      if (!raw) return null;
+      var data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.categories) || !Array.isArray(data.prompts)) return null;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 分类的层级路径，例如「代码开发 / 代码审查」
+  function categoryPath(cats, id) {
+    var chain = [];
+    var cur = cats.filter(function (c) { return c.id === id; })[0];
+    var guard = 0;
+    while (cur && guard++ < 50) {
+      chain.unshift(cur.name);
+      cur = cur.parentId ? cats.filter(function (c) { return c.id === cur.parentId; })[0] : null;
+    }
+    return chain.length ? chain.join(" / ") : "未分类";
+  }
+
+  // 按树的顺序摊平，depth 用来做下拉里的缩进
+  function flattenCategories(cats) {
+    var out = [];
+    var seen = {};
+    var walk = function (parentId, depth) {
+      cats.filter(function (c) { return c.parentId === parentId; })
+          .forEach(function (c) {
+            if (seen[c.id]) return;
+            seen[c.id] = true;
+            out.push({ id: c.id, name: c.name, depth: depth });
+            walk(c.id, depth + 1);
+          });
+    };
+    walk(null, 0);
+    // 父分类被删掉的孤儿节点，兜底补在末尾，别让它们从下拉里消失
+    cats.forEach(function (c) {
+      if (!seen[c.id]) out.push({ id: c.id, name: c.name, depth: 0 });
+    });
+    return out;
+  }
+
+  function indent(depth) {
+    var s = "";
+    for (var i = 0; i < depth; i++) s += "　";   // 全角空格，制造层级缩进
+    return s;
+  }
+
+  function loadCategories() {
+    var lib = readLibrary();
+    connected = !!lib;
+    libCategories = lib ? lib.categories : SEED_CATEGORIES;
+    libPromptCount = lib ? lib.prompts.length : 0;
+
+    // 重建下拉，尽量保留用户已经选中的分类
+    var keep = el.category.value;
+    var list = flattenCategories(libCategories);
+    var html = '<option value="">请选择分类…</option>';
+    list.forEach(function (c) {
+      html += '<option value="' + esc(c.id) + '">' + esc(indent(c.depth) + c.name) + '</option>';
+    });
+    el.category.innerHTML = html;
+
+    var stillThere = list.some(function (c) { return c.id === keep; });
+    el.category.value = stillThere ? keep : "";
+
+    renderLibStatus();
+    renderPreviewMeta();
+  }
+
+  function renderLibStatus() {
+    if (connected) {
+      libStatus.textContent = "已连接提示词库：" + libCategories.length + " 个分类 / " + libPromptCount + " 条提示词";
+      libStatus.className = "lib-status ok";
+    } else {
+      libStatus.textContent = "未读到提示词库数据，暂用内置的 " + SEED_CATEGORIES.length + " 个分类（打开一次提示词库后再点「刷新」）";
+      libStatus.className = "lib-status warn";
+    }
+  }
+
+  function saveToLibrary() {
+    var title = readValue("promptTitle");
+    var categoryId = readValue("category");
+    var body = buildBody();
+
+    if (!title) {
+      setStatus("请先填写标题", true);
+      el.promptTitle.focus();
+      return;
+    }
+    if (!categoryId) {
+      setStatus("请先选择分类", true);
+      el.category.focus();
+      return;
+    }
+    if (body.filled === 0) {
+      setStatus("提示词正文还是空的，先填几个要素再存", true);
+      return;
+    }
+
+    // 读不到就用种子数据初始化一份，这样提示词库第一次打开时能直接看到
+    var lib = readLibrary() || {
+      categories: JSON.parse(JSON.stringify(SEED_CATEGORIES)),
+      prompts: []
+    };
+
+    if (!lib.categories.some(function (c) { return c.id === categoryId; })) {
+      setStatus("所选分类在提示词库里已经不存在了，点「刷新」后重选", true);
+      return;
+    }
+
+    var path = categoryPath(lib.categories, categoryId);
+    var dup = lib.prompts.some(function (p) {
+      return p.categoryId === categoryId && p.title === title;
+    });
+    if (dup && !window.confirm("「" + path + "」下已经有一条标题为「" + title + "」的提示词了。\n仍要再存一条吗？")) {
+      setStatus("已取消保存，换个标题就行", false);
+      return;
+    }
+
+    lib.prompts.push({
+      id: uid(),
+      categoryId: categoryId,
+      title: title,
+      summary: makeSummary(body.text),
+      content: body.text,
+      updatedAt: Date.now()
+    });
+
+    try {
+      // 只写这两个键，和提示词库的 persist() 保持一致
+      localStorage.setItem(LIB_KEY, JSON.stringify({
+        categories: lib.categories,
+        prompts: lib.prompts
+      }));
+    } catch (e) {
+      setStatus("写入本地存储失败：" + (e && e.message ? e.message : "未知错误"), true);
+      return;
+    }
+
+    libCategories = lib.categories;
+    libPromptCount = lib.prompts.length;
+    connected = true;
+    renderLibStatus();
+    flashSaved();
+    setStatus("已存入「" + path + "」· 库中共 " + lib.prompts.length + " 条", false);
+  }
+
+  /* ============================================================
+   * 4. 拼装 CO-STAR 正文
+   * ============================================================ */
+  function buildBody() {
+    var filled = 0;
+    var blocks = FIELDS.map(function (f) {
+      var value = readValue(f.id);
+      if (!value) return null;
+      filled++;
+      return "# " + f.label + "（" + f.cn + "）\n" + value;
+    }).filter(Boolean);
+
+    return { text: blocks.join("\n\n"), filled: filled, total: FIELDS.length };
+  }
+
+  /* ============================================================
+   * 5. 渲染
+   * ============================================================ */
+  function renderPreviewMeta() {
+    var catId = readValue("category");
+    var title = readValue("promptTitle");
+
+    if (!catId && !title) {
+      previewMeta.textContent = "归档信息还没填：选了分类、填了标题才能存入提示词库";
+      return;
+    }
+
+    var path = catId ? categoryPath(libCategories, catId) : "（未选分类）";
+    previewMeta.textContent = "将存入：" + path + " › " + (title || "（未填标题）");
+  }
+
+  function generate() {
+    var result = buildBody();
+    hasGenerated = true;
+    renderPreviewMeta();
+
+    if (result.filled === 0) {
+      output.textContent = PLACEHOLDER_TEXT;
+      output.classList.add("placeholder");
+      setStatus("还没有填写任何要素", true);
+      return;
+    }
+
+    output.textContent = result.text;
+    output.classList.remove("placeholder");
+
+    var skipped = result.total - result.filled;
+    setStatus(
+      "已生成 · " + result.filled + "/" + result.total + " 个要素" +
+      (skipped > 0 ? "，已跳过 " + skipped + " 个空要素" : ""),
+      false
+    );
+  }
+
+  function setStatus(msg, kind) {
+    // kind: false / undefined = 普通，true 或 "warn" = 警告，"ok" = 成功
+    status.textContent = msg;
+    status.className = (kind === "ok") ? "ok" : (kind ? "warn" : "");
+  }
+
+  /* ============================================================
+   * 6. 复制：三级降级，兼容 file://
+   * ============================================================ */
+  function copyViaExecCommand(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    // 移动端 Safari 需要可编辑才能选中
+    ta.contentEditable = "true";
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.width = "1px";
+    ta.style.height = "1px";
+    ta.style.padding = "0";
+    ta.style.border = "none";
+    ta.style.outline = "none";
+    ta.style.boxShadow = "none";
+    ta.style.background = "transparent";
+    ta.style.opacity = "0";
+
+    document.body.appendChild(ta);
+
+    var selection = window.getSelection();
+    var savedRange = (selection && selection.rangeCount > 0) ? selection.getRangeAt(0) : null;
+
+    ta.focus();
+    ta.select();
+    try { ta.setSelectionRange(0, ta.value.length); } catch (e) { /* 老浏览器忽略 */ }
+
+    var ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (e) {
+      ok = false;
+    }
+
+    document.body.removeChild(ta);
+
+    if (savedRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(savedRange);
+    }
+    return ok;
+  }
+
+  function selectOutputFallback() {
+    // 最后手段：把预览区的文本选中，让用户按 Ctrl+C
+    var range = document.createRange();
+    range.selectNodeContents(output);
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function copyPrompt() {
+    var text = hasGenerated ? output.textContent : "";
+
+    if (!hasGenerated || !text || output.classList.contains("placeholder")) {
+      setStatus("请先生成提示词再复制", true);
+      return;
+    }
+
+    function done(ok) {
+      if (ok) {
+        flashCopied();
+        setStatus("已复制到剪贴板", "ok");
+      } else {
+        selectOutputFallback();
+        setStatus("自动复制失败，已帮你选中文本，请按 Ctrl+C", true);
+      }
+    }
+
+    // 1) 现代异步剪贴板 API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () { done(true); },
+        function () { done(copyViaExecCommand(text)); } // 2) 失败则降级
+      );
+      return;
+    }
+
+    // 2) 直接降级
+    done(copyViaExecCommand(text));
+  }
+
+  var copyTimer = null;
+  function flashCopied() {
+    btnCopy.textContent = "已复制 ✓";
+    btnCopy.classList.add("copied");
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(function () {
+      btnCopy.textContent = "复制";
+      btnCopy.classList.remove("copied");
+    }, 1500);
+  }
+
+  var saveTimer = null;
+  function flashSaved() {
+    btnSave.textContent = "已存入 ✓";
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      btnSave.textContent = "存入提示词库";
+    }, 1800);
+  }
+
+  /* ============================================================
+   * 7. 随机示例
+   * ============================================================ */
+  function pickExampleIndex() {
+    if (EXAMPLES.length <= 1) return 0;
+    var idx;
+    do {
+      idx = Math.floor(Math.random() * EXAMPLES.length);
+    } while (idx === lastExample);   // 别连着两次抽到同一条
+    return idx;
+  }
+
+  function fillExample() {
+    var idx = pickExampleIndex();
+    lastExample = idx;
+    var sample = EXAMPLES[idx];
+    var unmatched = [];
+
+    ALL_FIELDS.forEach(function (f) {
+      var node = el[f.id];
+      var value = sample[f.id] || "";
+
+      if (node.tagName !== "SELECT") {
+        node.value = value;
+        return;
+      }
+
+      // 示例值能对上预设选项就直接选中，对不上就退回「自定义…」
+      var matched = Array.prototype.some.call(node.options, function (opt) {
+        return opt.value === value;
+      });
+      var box = customInputs[f.id];
+
+      if (matched) {
+        node.value = value;
+        if (box) box.value = "";
+      } else if (box) {
+        node.value = CUSTOM;
+        box.value = value;
+      } else {
+        // 分类下拉没有「自定义」项：库里已经没这个分类了，只能留空
+        node.value = "";
+        unmatched.push(f.cn + "（" + value + "）");
+      }
+      syncCustom(f.id);
+    });
+
+    generate();
+    var msg = "已填入随机示例 " + (idx + 1) + "/" + EXAMPLES.length + "：" + sample.name;
+    if (unmatched.length) {
+      setStatus(msg + " · 但示例里的 " + unmatched.join("、") + " 不在当前分类中，已留空", true);
+    } else {
+      setStatus(msg, false);
+    }
+  }
+
+  /* ============================================================
+   * 8. 下拉框的「自定义…」开关
+   * ============================================================ */
+  function syncCustom(id) {
+    var box = customInputs[id];
+    if (box) box.hidden = (el[id].value !== CUSTOM);
+  }
+
+  // 扫描所有带 data-custom 的字段，通用接线，不用为每个下拉写一遍
+  var customFields = document.querySelectorAll(".field[data-custom]");
+  for (var i = 0; i < customFields.length; i++) {
+    (function (field) {
+      var select = field.querySelector("select");
+      var box = field.querySelector(".custom-input");
+      if (!select || !box) return;
+
+      customInputs[select.id] = box;
+      box.hidden = true;
+
+      select.addEventListener("change", function () {
+        syncCustom(select.id);
+        if (select.value === CUSTOM) box.focus();
+      });
+
+      // 手输框的内容也要触发实时预览
+      box.addEventListener("input", function () {
+        renderPreviewMeta();
+        if (hasGenerated) generate();
+      });
+    })(customFields[i]);
+  }
+
+  /* ============================================================
+   * 9. 事件绑定
+   * ============================================================ */
+  btnGen.addEventListener("click", generate);
+  btnCopy.addEventListener("click", copyPrompt);
+  btnEx.addEventListener("click", fillExample);
+  btnSave.addEventListener("click", saveToLibrary);
+  btnReload.addEventListener("click", function () {
+    loadCategories();
+    setStatus(connected
+      ? "已重新读取提示词库：" + libCategories.length + " 个分类 / " + libPromptCount + " 条提示词"
+      : "仍然没读到提示词库数据，当前用内置分类", !connected);
+  });
+
+  // 生成过一次之后，任何改动都实时刷新预览
+  ALL_FIELDS.forEach(function (f) {
+    var node = el[f.id];
+    var evt = (node.tagName === "SELECT") ? "change" : "input";
+    node.addEventListener(evt, function () {
+      renderPreviewMeta();
+      if (hasGenerated) generate();
+    });
+  });
+
+  // Ctrl/Cmd + Enter 快速生成
+  document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      generate();
+    }
+  });
+
+  /* ============================================================
+   * 10. 启动
+   * ============================================================ */
+  loadCategories();
+  renderPreviewMeta();
+})();
+</script>
+
+</body>
+</html>
