@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>提示词库 · Prompt Library</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --border: #e3e6ec;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --faint: #9aa1ad;
+    --accent: #2563eb;
+    --accent-soft: #eff4ff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* ---------- 三栏栅格：1 : 2 : 3 = 1/6 : 1/3 : 1/2 ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 2fr 3fr;
+    gap: 1px;
+    height: 100vh;
+    background: var(--border);
+  }
+
+  .col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  .col-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .col-head h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .col-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    overflow-y: auto;
+  }
+
+  #detailBody { padding: 16px 18px; gap: 0; }
+
+  /* ---------- 通用控件 ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--text);
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .15s, border-color .15s, opacity .15s;
+  }
+  .btn:hover:not(:disabled) { background: #f5f7fa; border-color: #c3cad6; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+  .btn-danger { color: #b91c1c; }
+  .btn-danger:hover:not(:disabled) { background: #fef2f2; border-color: #fecaca; }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    padding: 0;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { background: rgba(0, 0, 0, .07); color: var(--text); }
+
+  #search {
+    width: 108px;
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+
+  /* ---------- 左侧：分类树 ---------- */
+  .cat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .cat-item:hover { background: #f0f2f6; }
+  .cat-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  .caret { width: 12px; flex: 0 0 12px; text-align: center; font-size: 10px; color: var(--faint); }
+  .caret.leaf { color: transparent; }
+
+  .cat-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  .cat-count { flex: 0 0 auto; font-size: 11px; color: var(--faint); font-weight: 400; }
+
+  .cat-actions { flex: 0 0 auto; display: flex; gap: 1px; visibility: hidden; }
+  .cat-item:hover .cat-actions { visibility: visible; }
+
+  /* ---------- 中间：梗概列表 ---------- */
+  .p-item {
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .p-item:hover { background: #f5f7fa; }
+  .p-item.active { background: var(--accent-soft); border-color: #c7d8ff; }
+
+  .p-item-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .p-item h3 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; line-height: 1.5; }
+  .p-item time { flex: 0 0 auto; font-size: 11px; color: var(--faint); }
+  .p-item p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* ---------- 右侧：详情 ---------- */
+  .detail-title { margin: 2px 0 8px; font-size: 20px; line-height: 1.4; }
+  .detail-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    margin-bottom: 14px; font-size: 12px; color: var(--muted);
+  }
+  .tag {
+    padding: 1px 8px;
+    font-size: 12px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 10px;
+  }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .detail-content {
+    margin: 0;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.75;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f7f8fa;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  /* ---------- 编辑表单 ---------- */
+  .form { display: flex; flex-direction: column; gap: 12px; }
+  .form-row { display: flex; flex-direction: column; gap: 4px; }
+  .form-row label { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .form-row input,
+  .form-row select,
+  .form-row textarea {
+    width: 100%;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+    resize: vertical;
+  }
+  .form-row input:focus,
+  .form-row select:focus,
+  .form-row textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+  }
+  .form-row textarea.mono { font-family: var(--mono); line-height: 1.7; }
+  .form-actions { display: flex; gap: 8px; padding-top: 2px; }
+
+  /* ---------- 空状态 ---------- */
+  .empty-state {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 24px;
+    text-align: center;
+    color: var(--faint);
+  }
+  .empty-state strong { font-size: 13.5px; font-weight: 600; color: var(--muted); }
+  .empty-state span { font-size: 12.5px; line-height: 1.7; max-width: 26em; }
+
+  /* ---------- 吐司 ---------- */
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    z-index: 999;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: #fff;
+    background: #1f2430;
+    border-radius: 8px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 12px);
+    transition: opacity .18s, transform .18s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* ---------- 窄屏降级 ---------- */
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .app { grid-template-columns: 1fr; height: auto; }
+    .col { min-height: 320px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- 左：分类（1/6） -->
+  <aside class="col">
+    <header class="col-head">
+      <h2>分类</h2>
+      <button class="icon-btn" id="btnAddRoot" title="新建根分类">＋</button>
+    </header>
+    <div class="col-body" id="catTree"></div>
+  </aside>
+
+  <!-- 中：梗概（1/3） -->
+  <section class="col">
+    <header class="col-head">
+      <h2 id="listTitle">提示词</h2>
+      <div style="display:flex;align-items:center;gap:6px;min-width:0">
+        <input id="search" type="search" placeholder="搜索" />
+        <button class="btn" id="btnNewPrompt" disabled>＋ 新建</button>
+      </div>
+    </header>
+    <div class="col-body" id="promptList"></div>
+  </section>
+
+  <!-- 右：详情（1/2） -->
+  <section class="col">
+    <header class="col-head">
+      <h2>详情</h2>
+      <span id="detailMeta" style="font-size:11px;color:var(--faint)"></span>
+    </header>
+    <div class="col-body" id="detailBody"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ============================================================
+   * 0. 工具函数
+   * ============================================================ */
+  const STORE_KEY = 'prompt-library-v1';
+  const $ = (sel) => document.querySelector(sel);
+  const uid = () => 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (m) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
+  ));
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  function fmtTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
+      + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
+  function makeSummary(text) {
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    return s.length > 60 ? s.slice(0, 60) + '…' : s;
+  }
+
+  function emptyHTML(title, desc) {
+    return '<div class="empty-state"><strong>' + esc(title) + '</strong><span>' + esc(desc) + '</span></div>';
+  }
+
+  let toastTimer = null;
+  function toast(msg) {
+    let el = document.getElementById('toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+  }
+
+  async function copyText(text) {
+    // 优先使用异步剪贴板 API（需安全上下文）
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* 降级 */ }
+    }
+    // 降级方案：隐藏 textarea + execCommand
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* ============================================================
+   * 1. 种子数据（首次打开时注入）
+   * ============================================================ */
+  const SEED = {
+    categories: [
+      { id: 'cat-dev',      name: '代码开发', parentId: null },
+      { id: 'cat-review',   name: '代码审查', parentId: 'cat-dev' },
+      { id: 'cat-refactor', name: '重构优化', parentId: 'cat-dev' },
+      { id: 'cat-test',     name: '单元测试', parentId: 'cat-dev' },
+      { id: 'cat-doc',      name: '文档写作', parentId: null },
+      { id: 'cat-api',      name: '接口文档', parentId: 'cat-doc' },
+      { id: 'cat-arch',     name: '架构设计', parentId: null }
+    ],
+    prompts: [
+      {
+        id: 'p-review',
+        categoryId: 'cat-review',
+        title: '资深架构师代码审查',
+        summary: '以资深架构师视角逐维度审查代码，输出按严重程度分级的问题清单与可执行修复代码。',
+        content: [
+          '你是一名拥有 15 年一线经验的资深软件架构师，精通 Java、分布式系统与性能调优。',
+          '',
+          '任务：审查我提供的代码，输出结构化审查报告。',
+          '',
+          '审查维度（逐项检查，不得遗漏）：',
+          '1. 正确性：边界条件、空值处理、并发安全、异常传播路径。',
+          '2. 健壮性：外部依赖失败时的降级与重试策略。',
+          '3. 性能：时间复杂度、内存分配、N+1 查询、锁粒度。',
+          '4. 可维护性：命名、职责单一、圈复杂度、重复代码。',
+          '5. 安全性：输入校验、SQL 注入、越权访问、敏感信息泄露。',
+          '',
+          '输出格式：',
+          '- 【严重】必须修复：问题描述 + 代码位置 + 修复方案（附代码）',
+          '- 【警告】建议修复：问题描述 + 代码位置 + 修复方案',
+          '- 【建议】可选优化：优化点 + 收益说明',
+          '',
+          '约束：',
+          '- 每个问题必须给出可执行的修复代码，禁止空泛评价。',
+          '- 若某维度未发现问题，明确写“该维度未发现问题”，不得编造。',
+          '- 不确定的判断需标注前提假设。'
+        ].join('\n'),
+        updatedAt: Date.now() - 86400000
+      },
+      {
+        id: 'p-test',
+        categoryId: 'cat-test',
+        title: 'JUnit 5 单元测试生成器',
+        summary: '依据被测方法的契约生成覆盖正常、边界、异常三类场景的 JUnit 5 测试用例。',
+        content: [
+          '你是测试专家，精通 JUnit 5、Mockito 与边界值分析。',
+          '',
+          '任务：为我提供的方法生成完整可运行的单元测试。',
+          '',
+          '要求：',
+          '- 使用 JUnit 5（@Test / @ParameterizedTest / @Nested）。',
+          '- 外部依赖一律使用 Mockito 打桩，禁止真实 I/O。',
+          '- 场景覆盖：正常路径、边界值（0 / null / 空集合 / 极值）、异常路径。',
+          '- 断言必须具体，禁止 assertNotNull 这类弱断言。',
+          '- 测试方法命名遵循 given_when_then 风格。',
+          '',
+          '输出：仅输出 Java 代码块，不附加解释文字。'
+        ].join('\n'),
+        updatedAt: Date.now() - 3600000
+      },
+      {
+        id: 'p-refactor',
+        categoryId: 'cat-refactor',
+        title: '渐进式重构方案',
+        summary: '在不改变外部行为的前提下，输出分步可验证的重构计划与每一步的回归验证手段。',
+        content: [
+          '你是一名专注遗留系统治理的技术专家。',
+          '',
+          '任务：为我提供的代码输出一份渐进式重构方案。',
+          '',
+          '硬性约束：',
+          '- 重构过程不得改变任何外部可观测行为。',
+          '- 每一步必须可独立提交、可独立回滚。',
+          '- 每一步必须附带对应的验证手段（测试、断言、监控指标）。',
+          '',
+          '输出结构：',
+          '1. 现状诊断：坏味道清单，标注严重程度。',
+          '2. 目标形态：重构后的结构描述（可用类图文字描述）。',
+          '3. 分步计划：Step N —— 动作 / 影响面 / 验证手段 / 回滚方案。',
+          '4. 风险提示：可能引入的隐性风险与规避措施。'
+        ].join('\n'),
+        updatedAt: Date.now() - 172800000
+      }
+    ]
+  };
+
+  /* ============================================================
+   * 2. 状态与持久化
+   * ============================================================ */
+  function loadState() {
+    let raw = null;
+    try {
+      raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+    } catch (e) {
+      console.warn('[提示词库] 本地数据解析失败，已回退到示例数据。', e);
+    }
+    const data = (raw && Array.isArray(raw.categories) && Array.isArray(raw.prompts))
+      ? raw
+      : JSON.parse(JSON.stringify(SEED));
+
+    return {
+      categories: data.categories,
+      prompts: data.prompts,
+      // 以下为纯 UI 状态，不落盘
+      selectedCategoryId: null,
+      selectedPromptId: null,
+      editingId: null,   // 正在编辑的提示词 id；为 null 且 draft 存在时表示新建
+      draft: null,       // 编辑态的数据副本，保存前不污染源数据
+      expanded: {},      // categoryId -> boolean，缺省视为展开
+      query: ''
+    };
+  }
+
+  function persist() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        categories: state.categories,
+        prompts: state.prompts
+      }));
+    } catch (e) {
+      console.error('[提示词库] 写入本地存储失败。', e);
+      toast('保存失败：本地存储不可用');
+    }
+  }
+
+  let state = loadState();
+
+  /* ============================================================
+   * 3. 数据查询辅助
+   * ============================================================ */
+  const catChildren = (pid) => state.categories.filter((c) => c.parentId === pid);
+
+  // 收集某分类及其全部后代的 id
+  function collectIds(id, out) {
+    out = out || [];
+    out.push(id);
+    catChildren(id).forEach((c) => collectIds(c.id, out));
+    return out;
+  }
+
+  function categoryPath(id) {
+    const chain = [];
+    let cur = state.categories.find((c) => c.id === id);
+    let guard = 0;
+    while (cur && guard++ < 50) {
+      chain.unshift(cur.name);
+      cur = state.categories.find((c) => c.id === cur.parentId);
+    }
+    return chain.length ? chain.join(' / ') : '未分类';
+  }
+
+  /* ============================================================
+   * 4. 渲染：左侧分类树
+   * ============================================================ */
+  function renderCategories() {
+    const tree = $('#catTree');
+    const roots = catChildren(null);
+    tree.innerHTML = '';
+
+    if (!roots.length) {
+      tree.innerHTML = emptyHTML('尚无分类', '点击右上角「＋」创建第一个分类，再通过分类项上的「＋」建立子分类。');
+      return;
+    }
+
+    const walk = (list, depth) => {
+      list.forEach((cat) => {
+        const kids = catChildren(cat.id);
+        const open = state.expanded[cat.id] !== false;
+        const count = collectIds(cat.id)
+          .reduce((n, id) => n + state.prompts.filter((p) => p.categoryId === id).length, 0);
+
+        const el = document.createElement('div');
+        el.className = 'cat-item' + (state.selectedCategoryId === cat.id ? ' active' : '');
+        el.dataset.id = cat.id;
+        el.style.paddingLeft = (6 + depth * 14) + 'px';
+        el.innerHTML =
+          '<span class="caret' + (kids.length ? '' : ' leaf') + '">' +
+            (kids.length ? (open ? '▾' : '▸') : '·') +
+          '</span>' +
+          '<span class="cat-name" title="' + esc(cat.name) + '">' + esc(cat.name) + '</span>' +
+          '<span class="cat-count">' + (count || '') + '</span>' +
+          '<span class="cat-actions">' +
+            '<button class="icon-btn" data-act="add" title="新建子分类">＋</button>' +
+            '<button class="icon-btn" data-act="rename" title="重命名">✎</button>' +
+            '<button class="icon-btn" data-act="remove" title="删除">✕</button>' +
+          '</span>';
+
+        tree.appendChild(el);
+        if (kids.length && open) walk(kids, depth + 1);
+      });
+    };
+
+    walk(roots, 0);
+  }
+
+  /* ============================================================
+   * 5. 渲染：中间梗概列表
+   * ============================================================ */
+  function renderList() {
+    const listEl = $('#promptList');
+    const titleEl = $('#listTitle');
+    const btnNew = $('#btnNewPrompt');
+    const cat = state.categories.find((c) => c.id === state.selectedCategoryId);
+
+    if (!cat) {
+      titleEl.textContent = '提示词';
+      btnNew.disabled = true;
+      listEl.innerHTML = emptyHTML('未选择分类', '在左侧点击一个分类，这里将列出该分类及其全部子分类下的提示词梗概。');
+      return;
+    }
+
+    titleEl.textContent = cat.name;
+    btnNew.disabled = false;
+
+    const ids = new Set(collectIds(cat.id));
+    let items = state.prompts.filter((p) => ids.has(p.categoryId));
+
+    const q = state.query.trim().toLowerCase();
+    if (q) {
+      items = items.filter((p) =>
+        (p.title + ' ' + (p.summary || '') + ' ' + p.content).toLowerCase().includes(q)
+      );
+    }
+
+    items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+    if (!items.length) {
+      listEl.innerHTML = q
+        ? emptyHTML('无匹配结果', '当前分类下没有命中的提示词，尝试更换关键词。')
+        : emptyHTML('该分类暂无提示词', '点击右上角「＋ 新建」，在此分类下创建第一条提示词。');
+      return;
+    }
+
+    listEl.innerHTML = items.map((p) =>
+      '<div class="p-item' + (p.id === state.selectedPromptId ? ' active' : '') + '" data-id="' + p.id + '">' +
+        '<div class="p-item-top">' +
+          '<h3>' + esc(p.title) + '</h3>' +
+          '<time>' + esc(fmtTime(p.updatedAt).slice(5, 10)) + '</time>' +
+        '</div>' +
+        '<p>' + esc(p.summary || makeSummary(p.content)) + '</p>' +
+      '</div>'
+    ).join('');
+  }
+
+  /* ============================================================
+   * 6. 渲染：右侧详情 / 编辑表单
+   * ============================================================ */
+  function buildCategoryOptions(selectedId) {
+    const out = [];
+    const walk = (pid, depth) => {
+      catChildren(pid).forEach((c) => {
+        const indent = '\u3000'.repeat(depth); // 全角空格制造层级缩进
+        out.push(
+          '<option value="' + c.id + '"' + (c.id === selectedId ? ' selected' : '') + '>' +
+            indent + esc(c.name) +
+          '</option>'
+        );
+        walk(c.id, depth + 1);
+      });
+    };
+    walk(null, 0);
+    return out.join('');
+  }
+
+  function viewHTML(p) {
+    return '' +
+      '<article class="detail">' +
+        '<h1 class="detail-title">' + esc(p.title) + '</h1>' +
+        '<div class="detail-meta">' +
+          '<span class="tag">' + esc(categoryPath(p.categoryId)) + '</span>' +
+          '<span>更新于 ' + esc(fmtTime(p.updatedAt)) + '</span>' +
+          '<span>' + p.content.length + ' 字符</span>' +
+        '</div>' +
+        '<div class="detail-actions">' +
+          '<button class="btn btn-primary" data-act="copy">复制内容</button>' +
+          '<button class="btn" data-act="edit">编辑</button>' +
+          '<button class="btn btn-danger" data-act="delete">删除</button>' +
+        '</div>' +
+        '<pre class="detail-content">' + esc(p.content) + '</pre>' +
+      '</article>';
+  }
+
+  function formHTML(d, isNew) {
+    return '' +
+      '<div class="form">' +
+        '<div class="form-row">' +
+          '<label for="f-title">标题</label>' +
+          '<input id="f-title" type="text" value="' + esc(d.title) + '" placeholder="例如：资深架构师代码审查" />' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<label for="f-cat">所属分类</label>' +
+          '<select id="f-cat">' + buildCategoryOptions(d.categoryId) + '</select>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<label for="f-summary">梗概（留空将自动截取正文前 60 字）</label>' +
+          '<textarea id="f-summary" rows="2" placeholder="一句话说明这条提示词的用途">' + esc(d.summary) + '</textarea>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<label for="f-content">提示词正文</label>' +
+          '<textarea id="f-content" rows="18" class="mono" placeholder="在此撰写完整提示词内容">' + esc(d.content) + '</textarea>' +
+        '</div>' +
+        '<div class="form-actions">' +
+          '<button class="btn btn-primary" data-act="save">' + (isNew ? '创建' : '保存') + '</button>' +
+          '<button class="btn" data-act="cancel">取消</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function renderDetail() {
+    const host = $('#detailBody');
+    const meta = $('#detailMeta');
+
+    // 编辑态优先
+    if (state.draft) {
+      const isNew = !state.editingId;
+      meta.textContent = isNew ? '新建中' : '编辑中';
+      host.innerHTML = formHTML(state.draft, isNew);
+      if (isNew) {
+        const t = $('#f-title');
+        if (t) t.focus();
+      }
+      return;
+    }
+
+    const p = state.prompts.find((x) => x.id === state.selectedPromptId);
+    if (!p) {
+      meta.textContent = '';
+      host.innerHTML = emptyHTML('未选择提示词', '在中间列表点击任意梗概，此处将显示完整提示词内容，并提供复制与编辑操作。');
+      return;
+    }
+
+    meta.textContent = fmtTime(p.updatedAt);
+    host.innerHTML = viewHTML(p);
+  }
+
+  function renderAll() {
+    renderCategories();
+    renderList();
+    renderDetail();
+  }
+
+  /* ============================================================
+   * 7. 业务动作
+   * ============================================================ */
+  function selectCategory(id) {
+    state.selectedCategoryId = id;
+    // 若当前选中的提示词不属于新分类的分支，则清空右栏
+    if (state.selectedPromptId) {
+      const scope = new Set(collectIds(id));
+      const cur = state.prompts.find((p) => p.id === state.selectedPromptId);
+      if (!cur || !scope.has(cur.categoryId)) {
+        state.selectedPromptId = null;
+        state.draft = null;
+        state.editingId = null;
+      }
+    }
+    renderAll();
+  }
+
+  function addCategory(parentId) {
+    const name = prompt(parentId ? '新建子分类，请输入名称：' : '新建根分类，请输入名称：');
+    if (!name || !name.trim()) return;
+    const id = uid();
+    state.categories.push({ id: id, name: name.trim(), parentId: parentId || null });
+    if (parentId) state.expanded[parentId] = true;
+    persist();
+    renderCategories();
+    toast('分类已创建');
+  }
+
+  function renameCategory(id) {
+    const cat = state.categories.find((c) => c.id === id);
+    if (!cat) return;
+    const name = prompt('重命名分类：', cat.name);
+    if (!name || !name.trim()) return;
+    cat.name = name.trim();
+    persist();
+    renderAll();
+  }
+
+  function removeCategory(id) {
+    const cat = state.categories.find((c) => c.id === id);
+    if (!cat) return;
+    const ids = collectIds(id);
+    const childCount = ids.length - 1;
+    const promptCount = state.prompts.filter((p) => ids.indexOf(p.categoryId) !== -1).length;
+
+    const msg = '确认删除分类「' + cat.name + '」？\n\n'
+      + '· 将同时删除 ' + childCount + ' 个子分类\n'
+      + '· 将同时删除 ' + promptCount + ' 条提示词\n\n'
+      + '此操作不可撤销。';
+    if (!confirm(msg)) return;
+
+    const dead = new Set(ids);
+    state.categories = state.categories.filter((c) => !dead.has(c.id));
+    state.prompts = state.prompts.filter((p) => !dead.has(p.categoryId));
+
+    if (dead.has(state.selectedCategoryId)) state.selectedCategoryId = null;
+    if (state.selectedPromptId && !state.prompts.some((p) => p.id === state.selectedPromptId)) {
+      state.selectedPromptId = null;
+    }
+    state.draft = null;
+    state.editingId = null;
+
+    persist();
+    renderAll();
+    toast('分类已删除');
+  }
+
+  function startNewPrompt() {
+    if (!state.selectedCategoryId) return;
+    state.selectedPromptId = null;
+    state.editingId = null;
+    state.draft = {
+      id: null,
+      title: '',
+      summary: '',
+      content: '',
+      categoryId: state.selectedCategoryId,
+      updatedAt: Date.now()
+    };
+    renderAll();
+  }
+
+  function startEditPrompt() {
+    const p = state.prompts.find((x) => x.id === state.selectedPromptId);
+    if (!p) return;
+    state.editingId = p.id;
+    state.draft = Object.assign({}, p); // 浅拷贝足够（字段均为原始值）
+    renderDetail();
+  }
+
+  function cancelEdit() {
+    state.draft = null;
+    state.editingId = null;
+    renderAll();
+  }
+
+  function saveDraft() {
+    const titleEl = $('#f-title');
+    const contentEl = $('#f-content');
+    const catEl = $('#f-cat');
+    const summaryEl = $('#f-summary');
+    if (!titleEl || !contentEl || !catEl || !summaryEl) return;
+
+    const title = titleEl.value.trim();
+    const content = contentEl.value;
+    const categoryId = catEl.value;
+    let summary = summaryEl.value.trim();
+
+    if (!title) {
+      toast('标题不能为空');
+      titleEl.focus();
+      return;
+    }
+    if (!summary) summary = makeSummary(content);
+
+    const now = Date.now();
+
+    if (state.editingId) {
+      const p = state.prompts.find((x) => x.id === state.editingId);
+      if (p) {
+        Object.assign(p, { title: title, summary: summary, content: content, categoryId: categoryId, updatedAt: now });
+        state.selectedPromptId = p.id;
+      }
+    } else {
+      const np = { id: uid(), title: title, summary: summary, content: content, categoryId: categoryId, updatedAt: now };
+      state.prompts.push(np);
+      state.selectedPromptId = np.id;
+    }
+
+    state.draft = null;
+    state.editingId = null;
+    persist();
+    renderAll();
+    toast('已保存');
+  }
+
+  function deletePrompt() {
+    const p = state.prompts.find((x) => x.id === state.selectedPromptId);
+    if (!p) return;
+    if (!confirm('确认删除提示词「' + p.title + '」？此操作不可撤销。')) return;
+    state.prompts = state.prompts.filter((x) => x.id !== p.id);
+    state.selectedPromptId = null;
+    persist();
+    renderAll();
+    toast('已删除');
+  }
+
+  async function copyCurrent() {
+    const p = state.prompts.find((x) => x.id === state.selectedPromptId);
+    if (!p) return;
+    const ok = await copyText(p.content);
+    toast(ok ? '已复制到剪贴板' : '复制失败，请手动选择文本');
+  }
+
+  /* ============================================================
+   * 8. 事件绑定
+   * ============================================================ */
+  // 8.1 分类树：事件委托
+  $('#catTree').addEventListener('click', (e) => {
+    const item = e.target.closest('.cat-item');
+    if (!item) return;
+    const id = item.dataset.id;
+
+    const actBtn = e.target.closest('[data-act]');
+    if (actBtn) {
+      e.stopPropagation();
+      const act = actBtn.dataset.act;
+      if (act === 'add') addCategory(id);
+      else if (act === 'rename') renameCategory(id);
+      else if (act === 'remove') removeCategory(id);
+      return;
+    }
+
+    if (e.target.classList.contains('caret')) {
+      const isOpen = state.expanded[id] !== false;
+      state.expanded[id] = !isOpen;
+      renderCategories();
+      return;
+    }
+
+    selectCategory(id);
+  });
+
+  // 8.2 梗概列表：事件委托
+  $('#promptList').addEventListener('click', (e) => {
+    const item = e.target.closest('.p-item');
+    if (!item) return;
+    if (state.draft && !confirm('当前编辑尚未保存，确认放弃并切换？')) return;
+    state.draft = null;
+    state.editingId = null;
+    state.selectedPromptId = item.dataset.id;
+    renderAll();
+  });
+
+  // 8.3 详情区：事件委托
+  $('#detailBody').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === 'copy') copyCurrent();
+    else if (act === 'edit') startEditPrompt();
+    else if (act === 'save') saveDraft();
+    else if (act === 'cancel') cancelEdit();
+    else if (act === 'delete') deletePrompt();
+  });
+
+  // 8.4 头部按钮与搜索
+  $('#btnAddRoot').addEventListener('click', () => addCategory(null));
+  $('#btnNewPrompt').addEventListener('click', startNewPrompt);
+  $('#search').addEventListener('input', (e) => {
+    state.query = e.target.value;
+    renderList();
+  });
+
+  // 8.5 快捷键：Ctrl/Cmd + S 保存编辑
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      if (state.draft) {
+        e.preventDefault();
+        saveDraft();
+      }
+    }
+    if (e.key === 'Escape' && state.draft) {
+      cancelEdit();
+    }
+  });
+
+  /* ============================================================
+   * 9. 启动
+   * ============================================================ */
+  renderAll();
+})();
+</script>
+</body>
+</html>
